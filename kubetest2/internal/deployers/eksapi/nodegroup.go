@@ -18,6 +18,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"golang.org/x/exp/slices"
 	"k8s.io/klog/v2"
 
 	"github.com/aws/aws-k8s-tester/kubetest2/internal/deployers/eksapi/templates"
@@ -28,28 +29,28 @@ const (
 )
 
 var (
-	defaultInstanceTypes_x86_64 = []string{
-		"m6i.xlarge",
-		"m6i.large",
-		"m5.large",
-		"m4.large",
+	defaultInstanceTypes_x86_64 = []ec2types.InstanceType{
+		ec2types.InstanceTypeM6iXlarge,
+		ec2types.InstanceTypeM6iLarge,
+		ec2types.InstanceTypeM5Large,
+		ec2types.InstanceTypeM4Large,
 	}
 
-	defaultInstanceTypes_arm64 = []string{
-		"m7g.xlarge",
-		"m7g.large",
-		"m6g.xlarge",
-		"m6g.large",
-		"t4g.xlarge",
-		"t4g.large",
+	defaultInstanceTypes_arm64 = []ec2types.InstanceType{
+		ec2types.InstanceTypeM7gXlarge,
+		ec2types.InstanceTypeM7gLarge,
+		ec2types.InstanceTypeM7gXlarge,
+		ec2types.InstanceTypeM6gLarge,
+		ec2types.InstanceTypeT4gXlarge,
+		ec2types.InstanceTypeT4gLarge,
 	}
 
-	defaultInstanceTypesByEC2ArchitectureValues = map[ec2types.ArchitectureValues][]string{
+	defaultInstanceTypesByEC2ArchitectureValues = map[ec2types.ArchitectureValues][]ec2types.InstanceType{
 		ec2types.ArchitectureValuesX8664: defaultInstanceTypes_x86_64,
 		ec2types.ArchitectureValuesArm64: defaultInstanceTypes_arm64,
 	}
 
-	defaultInstanceTypesByEKSAMITypes = map[ekstypes.AMITypes][]string{
+	defaultInstanceTypesByEKSAMITypes = map[ekstypes.AMITypes][]ec2types.InstanceType{
 		ekstypes.AMITypesAl2X8664:            defaultInstanceTypes_x86_64,
 		ekstypes.AMITypesAl2Arm64:            defaultInstanceTypes_arm64,
 		ekstypes.AMITypesAl2023X8664Standard: defaultInstanceTypes_x86_64,
@@ -78,9 +79,9 @@ func (m *NodegroupManager) createNodegroup(infra *Infrastructure, cluster *Clust
 				return fmt.Errorf("failed to describe AMI when populating default instance types: %s: %v", opts.AMI, err)
 			} else {
 				amiArch := out.Images[0].Architecture
-				defaultInstanceTypes, ok := defaultInstanceTypesByEC2ArchitectureValues[amiArch]
-				if !ok {
-					return fmt.Errorf("no default instance types known for AMI architecture: %v", amiArch)
+				defaultInstanceTypes, err := m.getValidDefaultsByArch(amiArch)
+				if err != nil {
+					return err
 				}
 				opts.InstanceTypes = defaultInstanceTypes
 				klog.V(2).Infof("Using default instance types for AMI architecture: %v: %v", amiArch, opts.InstanceTypes)
@@ -116,9 +117,9 @@ func (m *NodegroupManager) createManagedNodegroup(infra *Infrastructure, cluster
 	} else {
 		// managed nodegroups uses a t3.medium by default at the time of writing
 		// this only supports 17 pods, which can cause some flakes in the k8s e2e suite
-		defaultInstanceTypes, ok := defaultInstanceTypesByEKSAMITypes[input.AmiType]
-		if !ok {
-			return fmt.Errorf("no default instance types known for AmiType: %v", input.AmiType)
+		defaultInstanceTypes, err := m.getValidDefaultsByAMIType(input.AmiType)
+		if err != nil {
+			return err
 		}
 		input.InstanceTypes = defaultInstanceTypes
 	}
@@ -531,4 +532,73 @@ func (m *NodegroupManager) getSubnetWithCapacity(infra *Infrastructure, opts *de
 	subnetId := *subnet.Subnets[0].SubnetId
 	klog.Infof("Using subnet: %s", subnetId)
 	return subnetId, capacityReservationId, nil
+}
+
+func (m *NodegroupManager) getValidDefaultsByAMIType(amiType ekstypes.AMITypes) ([]string, error) {
+	defaults, ok := defaultInstanceTypesByEKSAMITypes[amiType]
+	if !ok {
+		return []string{}, fmt.Errorf("no default instance types known for AmiType: %v", amiType)
+	}
+
+	return m.getValidInstanceTypesFromList(defaults), nil
+}
+
+func (m *NodegroupManager) getValidDefaultsByArch(arch ec2types.ArchitectureValues) ([]string, error) {
+	defaults, ok := defaultInstanceTypesByEC2ArchitectureValues[arch]
+	if !ok {
+		return []string{}, fmt.Errorf("no default instance types known for AMI architecture: %v", arch)
+	}
+
+	return m.getValidInstanceTypesFromList(defaults), nil
+}
+
+func (m *NodegroupManager) getValidInstanceTypesFromList(desiredInstanceTypes []ec2types.InstanceType) []string {
+	_, err := m.clients.EC2().DescribeInstanceTypes(context.TODO(), &ec2.DescribeInstanceTypesInput{
+		InstanceTypes: desiredInstanceTypes,
+	})
+
+	invalidInstances := []string{}
+	if err != nil {
+		invalidInstances = parseInvalidInstanceTypesStrings(err)
+	}
+
+	return parseValidInstances(desiredInstanceTypes, invalidInstances)
+}
+
+func parseInvalidInstanceTypesStrings(err error) []string {
+	if !isInvalidInstanceTypeError(err) {
+		klog.Infof("Received error other than InvalidInstanceType, skipping parsing invalid instances: %v", err)
+		return []string{}
+	}
+	errString := fmt.Sprint(err)
+
+	invalidInstancesStartIndex := strings.LastIndex(errString, "[") + 1 // trim leading '['
+	invalidInstancesEndIndex := len(errString) - 1                      // trim trailing ']'
+	instanceSeparator := ", "                                           // divider between instance types in output
+
+	invalidInstancesStr := errString[invalidInstancesStartIndex:invalidInstancesEndIndex]
+	invalidInstancesArr := strings.Split(invalidInstancesStr, instanceSeparator)
+
+	return invalidInstancesArr
+}
+
+func parseValidInstances(desiredInstances []ec2types.InstanceType, invalidInstances []string) []string {
+	validInstances := []string{}
+
+	for _, instanceType := range desiredInstances {
+		instanceTypeStr := fmt.Sprint(instanceType)
+		if !slices.Contains(invalidInstances, instanceTypeStr) {
+			validInstances = append(validInstances, instanceTypeStr)
+		} else {
+			klog.Infof("Eliminating instance type %s as an option", instanceTypeStr)
+		}
+	}
+
+	return validInstances
+}
+
+func isInvalidInstanceTypeError(err error) bool {
+	errString := fmt.Sprint(err)
+
+	return strings.Contains(errString, "InvalidInstanceType")
 }
