@@ -3,6 +3,8 @@ package templates
 import (
 	_ "embed"
 	"text/template"
+
+	"github.com/Masterminds/sprig/v3"
 )
 
 //go:embed infra.yaml
@@ -12,17 +14,11 @@ var (
 	//go:embed unmanaged-nodegroup.yaml.template
 	unmanagedNodegroupTemplate string
 	UnmanagedNodegroup         = template.Must(template.New("unmanagedNodegroup").Parse(unmanagedNodegroupTemplate))
-)
 
-type NetworkInterface struct {
-	Description         *string
-	NetworkCardIndex    *int
-	DeviceIndex         *int
-	InterfaceType       *string
-	Groups              []string
-	SubnetId            *string
-	DeleteOnTermination *bool
-}
+	//go:embed unmanaged-nodegroup-efa.yaml.template
+	unmanagedNodegroupEFATemplate string
+	UnmanagedNodegroupEFA         = template.Must(template.New("unmanagedNodegroupEFA").Parse(unmanagedNodegroupEFATemplate))
+)
 
 type UnmanagedNodegroupTemplateData struct {
 	NetworkInterfaces  []NetworkInterface

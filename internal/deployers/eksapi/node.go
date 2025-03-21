@@ -352,6 +352,107 @@ func (m *nodeManager) createUnmanagedNodegroup(infra *Infrastructure, cluster *C
 	if err != nil {
 		return err
 	}
+	templateBuf := bytes.Buffer{}
+	err = templates.UnmanagedNodegroup.Execute(&templateBuf, struct {
+		InstanceTypes     []string
+		KubernetesVersion string
+		NodeCount         int
+	}{
+		InstanceTypes:     opts.InstanceTypes,
+		KubernetesVersion: opts.KubernetesVersion,
+		NodeCount:         opts.Nodes,
+	})
+	if err != nil {
+		return err
+	}
+	volumeMountPath := "/dev/xvda"
+	if opts.UserDataFormat == "bottlerocket" {
+		volumeMountPath = "/dev/xvdb"
+	}
+	input := cloudformation.CreateStackInput{
+		StackName:    aws.String(stackName),
+		TemplateBody: aws.String(templateBuf.String()),
+		Capabilities: []cloudformationtypes.Capability{cloudformationtypes.CapabilityCapabilityIam},
+		Parameters: []cloudformationtypes.Parameter{
+			{
+				ParameterKey:   aws.String("ResourceId"),
+				ParameterValue: aws.String(m.resourceID),
+			},
+			{
+				ParameterKey:   aws.String("VpcId"),
+				ParameterValue: aws.String(infra.vpc),
+			},
+			{
+				ParameterKey:   aws.String("SubnetIds"),
+				ParameterValue: aws.String(strings.Join(infra.subnets(), ",")),
+			},
+			{
+				ParameterKey:   aws.String("UserData"),
+				ParameterValue: aws.String(userData),
+			},
+			{
+				ParameterKey:   aws.String("UserDataIsMIMEPart"),
+				ParameterValue: aws.String(strconv.FormatBool(userDataIsMimePart)),
+			},
+			{
+				ParameterKey:   aws.String("ClusterName"),
+				ParameterValue: aws.String(cluster.name),
+			},
+			{
+				ParameterKey:   aws.String("NodeRoleName"),
+				ParameterValue: aws.String(infra.nodeRoleName),
+			},
+			{
+				ParameterKey:   aws.String("NodeCount"),
+				ParameterValue: aws.String(strconv.Itoa(opts.Nodes)),
+			},
+			{
+				ParameterKey:   aws.String("SecurityGroup"),
+				ParameterValue: aws.String(cluster.securityGroupId),
+			},
+			{
+				ParameterKey:   aws.String("AMIId"),
+				ParameterValue: aws.String(opts.AMI),
+			},
+			{
+				ParameterKey:   aws.String("VolumeMountPath"),
+				ParameterValue: aws.String(volumeMountPath),
+			},
+		},
+	}
+	out, err := m.clients.CFN().CreateStack(context.TODO(), &input)
+	if err != nil {
+		return err
+	}
+	klog.Infof("waiting for unmanaged nodegroup to be created: %s", *out.StackId)
+	err = cloudformation.NewStackCreateCompleteWaiter(m.clients.CFN()).
+		Wait(context.TODO(),
+			&cloudformation.DescribeStacksInput{
+				StackName: out.StackId,
+			},
+			opts.NodeCreationTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to wait for unmanaged nodegroup stack creation: %w", err)
+	}
+	klog.Infof("created unmanaged nodegroup stack: %s", *out.StackId)
+	if opts.ExpectedAMI != "" {
+		if ok, err := m.verifyASGAMI(m.resourceID, opts.ExpectedAMI); err != nil {
+			return err
+		} else if !ok {
+			return fmt.Errorf("ASG %s is not using expected AMI: %s", m.resourceID, opts.ExpectedAMI)
+		}
+	}
+	return nil
+}
+
+func (m *nodeManager) createUnmanagedNodegroupWithEFA(infra *Infrastructure, cluster *Cluster, opts *deployerOptions) error {
+	stackName := m.getUnmanagedNodegroupStackName()
+	klog.Infof("creating unmanaged nodegroup with EFA stack...")
+	userData, userDataIsMimePart, err := generateUserData(opts.UserDataFormat, cluster)
+	if err != nil {
+		return err
+	}
+	var subnetId, capacityReservationId string
 	if opts.CapacityReservation {
 		capacityReservation, err := m.getCapacityReservation(opts)
 		if err != nil {

@@ -25,9 +25,6 @@ Parameters:
     Description: Node disk size in gigabytes.
     Default: 100
 
-  NodeCount:
-    Type: Number
-
   ClusterName:
     Type: String
 
@@ -101,7 +98,68 @@ Resources:
     Properties:
       Path: "/"
       Roles:
-        - !Ref NodeRoleName
+      - !Ref NodeRoleName
+
+  {{}}
+  
+  NodeGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        WaitOnResourceSignals: true
+        PauseTime: PT15M
+    Properties:
+      AutoScalingGroupName: !Ref ResourceId
+      DesiredCapacity: {{ .NodeCount }}
+      MinSize: {{ .NodeCount }}
+      MaxSize: {{ .NodeCount }}
+      MixedInstancesPolicy:
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref NodeLaunchTemplate
+            # LaunchTemplateName: String
+            Version: !GetAtt NodeLaunchTemplate.LatestVersionNumber
+          Overrides:
+            {{- range .InstanceTypes}}
+            - InstanceType: "{{.}}"
+            {{- end}}
+      VPCZoneIdentifier:
+        !Ref SubnetIds
+      Tags:
+        # necessary for kubelet's legacy, in-tree cloud provider
+        - Key: !Sub kubernetes.io/cluster/${ClusterName}
+          Value: owned
+          PropagateAtLaunch: true
+
+  {{- range $i, $e := until 5}}
+    NodeGroup:
+      Type: AWS::AutoScaling::AutoScalingGroup
+      UpdatePolicy:
+        AutoScalingRollingUpdate:
+          WaitOnResourceSignals: true
+          PauseTime: PT15M
+      Properties:
+        AutoScalingGroupName: !Ref ResourceId
+        DesiredCapacity: !Ref NodeCount
+        MinSize: !Ref NodeCount
+        MaxSize: !Ref NodeCount
+        MixedInstancesPolicy:
+          LaunchTemplate:
+            LaunchTemplateSpecification:
+              LaunchTemplateId: !Ref NodeLaunchTemplate
+              # LaunchTemplateName: String
+              Version: !GetAtt NodeLaunchTemplate.LatestVersionNumber
+            Overrides:
+              {{- range .InstanceTypes}}
+              - InstanceType: "{{.}}"
+              {{- end}}
+        VPCZoneIdentifier:
+          !Ref SubnetIds
+        Tags:
+          # necessary for kubelet's legacy, in-tree cloud provider
+          - Key: !Sub kubernetes.io/cluster/${ClusterName}
+            Value: owned
+            PropagateAtLaunch: true
 
   NodeLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
