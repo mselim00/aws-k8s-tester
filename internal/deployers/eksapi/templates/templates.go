@@ -34,8 +34,10 @@ type NetworkInterface struct {
 
 type UnmanagedNodegroupTemplateData struct {
 	NetworkInterfaces []NetworkInterface
-	KubernetesVersion string
 	InstanceTypes     []string
+	EC2AdditionalInfo string
+	NoASG             bool
+	NodeCount         int
 }
 
 type BusyboxDeploymentTemplateData struct {
