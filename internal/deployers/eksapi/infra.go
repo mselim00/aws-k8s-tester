@@ -460,5 +460,8 @@ func (m *InfrastructureManager) getAZsWithCapacity(opts *deployerOptions) ([]str
 			break
 		}
 	}
+	if len(subnetAzs) == 0 {
+		return []string{}, fmt.Errorf("could not find any capacity reservation for instance types %v with at least %d instances", opts.InstanceTypes, opts.Nodes)
+	}
 	return subnetAzs, nil
 }

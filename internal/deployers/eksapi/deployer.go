@@ -267,6 +267,9 @@ func (d *deployer) verifyUpFlags() error {
 		klog.Infof("Skip configuration for static cluster")
 		return nil
 	}
+	if len(d.AvailabilityZones) > numInfraAZs {
+		return fmt.Errorf("--availability-zones must have include no more than %d availability zones", numInfraAZs)
+	}
 	if len(d.InstanceTypes) > 0 && len(d.InstanceTypeArchs) > 0 {
 		return fmt.Errorf("--instance-types and --instance-type-archs are mutually exclusive")
 	}

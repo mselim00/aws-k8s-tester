@@ -606,16 +606,16 @@ func (m *nodeManager) getCapacityReservation(opts *deployerOptions, availability
 }
 
 func (m *nodeManager) getValidAvailabilityZonesFilter(opts *deployerOptions, infra *Infrastructure) ([]string, error) {
-	if !opts.EFA {
-		// no filter needed, leaves scheduling to EC2 provisioner
-		return []string{}, nil
-	}
-
 	var possibleAZs []string
 	if len(opts.AvailabilityZones) != 0 {
+		// opts AZs is assumed to be a subset of infra AZs
 		possibleAZs = opts.AvailabilityZones
 	} else {
 		possibleAZs = infra.availabilityZones
+	}
+	if !opts.EFA {
+		// if not using EFA, allow all available availability zones to leave scheduling to ASG LB or EC2 provisioner
+		return possibleAZs, nil
 	}
 	describeResponse, err := m.clients.EC2().DescribeInstanceTypeOfferings(context.TODO(), &ec2.DescribeInstanceTypeOfferingsInput{
 		Filters: []ec2types.Filter{
