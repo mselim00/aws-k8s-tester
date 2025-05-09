@@ -119,7 +119,7 @@ func (m *InfrastructureManager) createInfrastructureStack(opts *deployerOptions)
 			return nil, err
 		}
 	} else if len(opts.InstanceTypes) > 0 {
-		azs, err := m.getRankedAZsForInstanceTypes(opts, allowedAZs)
+		azs, err := m.getRankedAZsForInstanceTypes(opts)
 		if err != nil {
 			return nil, err
 		}
@@ -481,6 +481,9 @@ func (m *InfrastructureManager) getAZsWithCapacity(opts *deployerOptions) ([]str
 			subnetAzs = append(subnetAzs, *cr.AvailabilityZone)
 			break
 		}
+	}
+	if len(subnetAzs) == 0 {
+		return []string{}, fmt.Errorf("could not find any capacity reservation for instance types %v with at least %d instances", opts.InstanceTypes, opts.Nodes)
 	}
 	return subnetAzs, nil
 }
