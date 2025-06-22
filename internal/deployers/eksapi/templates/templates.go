@@ -59,6 +59,10 @@ var (
 	//go:embed nvidia_static_cluster_nodepool.yaml.template
 	nvidiaStaticClusterNodepoolTemplate string
 	NvidiaStaticClusterNodepool         = template.Must(template.New("nvidiaStaticClusterNodepool").Parse(nvidiaStaticClusterNodepoolTemplate))
+
+	//go:embed vpc_cni_daemonset_patch.json.template
+	vpcCNIDaemonSetPatchTemplate string
+	VPCCNIDaemonSetPatch         = template.Must(template.New("vpcCNIDaemonsetPatch").Parse(vpcCNIDaemonSetPatchTemplate))
 )
 
 type UserDataTemplateData struct {
@@ -78,4 +82,14 @@ var (
 type AuthMapRoleTemplateData struct {
 	NodeNameStrategy string
 	Rolearn          string
+}
+
+type EnvironmentVariable struct {
+	Name  string
+	Value string
+}
+
+type VPCCNITemplateData struct {
+	EnvironmentVariables []EnvironmentVariable
+	AWSNodeImageURI      string
 }

@@ -657,8 +657,11 @@ func (m *nodeManager) getValidAvailabilityZonesFilter(opts *deployerOptions, inf
 func (m *nodeManager) getValidSubnets(opts *deployerOptions, infra *Infrastructure, availabilityZoneFilter []string) ([]string, error) {
 	var describeFilters []ec2types.Filter
 	var targetSubnets []string
-	if opts.EFA {
-		// EFA requires private subnets
+	if opts.EnableCustomNetworking {
+		targetSubnets = infra.subnetsPublic
+	} else if opts.EnableSecurityGroupsForPods {
+		// SGPP pods must be in private subnets
+		// https://docs.aws.amazon.com/eks/latest/userguide/security-groups-for-pods.html
 		targetSubnets = infra.subnetsPrivate
 	} else {
 		targetSubnets = infra.subnets()

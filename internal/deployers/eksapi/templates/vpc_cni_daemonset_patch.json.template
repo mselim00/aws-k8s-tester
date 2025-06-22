@@ -1,0 +1,27 @@
+{
+	"spec": {
+		"template": {
+			"spec": {
+				"containers": [
+					{
+						{{ if .EnvironmentVariables -}}
+						"env": [
+							{{- range $index, $variable := .EnvironmentVariables}}
+							{{ if (ge $index 1) -}},{{ end -}}
+							{
+								"name": "$variable.Name",
+								"value": "$variable.Value"
+							}
+							{{- end}}
+						],
+						{{ end -}}
+						{{ if .AWSNodeImageURI -}}
+						"image": {{ .AWSNodeImageURI }},
+						{{ end -}}
+						"name": "aws-node"
+					}
+				]
+			}
+		}
+	}
+}
